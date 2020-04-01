@@ -1,0 +1,629 @@
+---
+title: "SwedenBenthicAlgae"
+author: "M. Fork"
+date: "3/31/2020"
+output: html_document
+---
+
+The following code was used to perform the analyses and produce the figures in the manuscript "Dissolved organic matter regulates growth of benthic algae in northern lakes through interacting effects on nutrient and light availability" by Fork, Karlsson, and Sponseller submitted to L&O Letters. Data are available via the Swedish National Data Repository (DOI:...). Code was developed by Megan L. Fork and last edited on 31 March 2020. 
+
+Code chunks here include:
+1. load libraries and data; manipulate and join data
+2. Estimated light transmission
+3. Stats on chla data, including polynomial fits for DOC, light, and TDN
+4. Water chemistry
+5. Chl-a response ratios
+
+Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N 
+Figure 2: chl-a response ratios vs. light
+Figure S1. Map
+Figure S3. N and P vs. DOC
+Figure S4. chla vs. light transmission for C, N, and NP treatments
+
+*For Figure S2, see other code file "ChlaCalculations.csv"
+
+```{r 1. load libraries and data}
+
+library(reshape2)
+library(tidyverse)
+library(plotrix)
+library(data.table)
+library(multcomp)
+library(nlme)
+library(maps)
+library(rgdal)
+library(stringr)
+
+setwd("D:/UmeaResearch/ForkWallenbergLakes")
+#Load chl-a data
+chla.data<-read.csv2("chlaDataUpdated.csv",header=T,sep=",",dec=".")
+chla.data$SampleID<-as.character(chla.data$SampleID)
+chla.wide<-reshape2::dcast(chla.data,SampleLoc+Depth+Treatment~Rep,value.var='chla_ug_cm2') # cast dataframe from long to wide format
+#For wide format data, calculate mean and sd of chla reps:
+chla.wide$chla.mean<-rowMeans(chla.wide[c("1","2","3","4","5")],na.rm=T)
+chla.wide$chla.sd<-apply(chla.wide[c("1","2","3","4","5")],1,sd,na.rm=T)
+chla.wide$chla.count<-apply(chla.wide[c("1","2","3","4","5")],1, function(x) length(which(!is.na(x))))
+chla.wide$LDT<-paste0(chla.wide$SampleLoc,"_",chla.wide$Depth,"_",chla.wide$Treatment)
+colnames(chla.wide)<-c("SampleLoc","Depth","Treatment","chla_1","chla_2","chla_3","chla_4","chla_5","chla.mean","chla.sd","chla.count","LDT")
+
+# Load the lake data
+lake.data<-read.csv2("ForkSummer2018LakeAbs.csv",header=T,sep=",",dec=".")[1:10,]
+colnames(lake.data)[2]<-"SampleLoc"
+
+# Load the water chemistry data
+water.chem<-read.csv2("WaterChem.csv",header=T,sep=",",dec=".")
+water.chem.data<-water.chem[,c(3:4,8:17)]
+water.chem.data$NO3_ugL[which(water.chem.data$SampleLoc=="Abb2" & water.chem.data$Visit == 1)]<-NA # remove the nitrate outlier
+water.chem.data$DOP[water.chem.data$DOP<0]<-0 #replace negative values of DOP with zero
+water.chem.data$DIN<-water.chem.data$NH4_ugL+water.chem.data$NO3_ugL
+water.chem.data$DON2DOC<-water.chem.data$DON/(water.chem.data$DOC_mgL*1000)
+
+# Make the water.chem replicates wide to facilitate summary
+foo<-gather(water.chem.data,"param","value",-c(SampleLoc,Visit))
+water.chemistry<-foo %>% spread(Visit,value)
+water.chemistry$chem.mean<-rowMeans(water.chemistry[,which(names(water.chemistry) %in% c("1","2","3"))],na.rm=T)
+water.chemistry$chem.sd<-apply(water.chemistry[,which(names(water.chemistry) %in% c("1","2","3"))],1,sd,na.rm=T)
+
+water.chemistry.wide<-cbind(subset(water.chemistry,param=="DOC_mgL")[,c(1,3:7)],subset(water.chemistry,param=="TDN")[,3:7],subset(water.chemistry,param=="DON")[,3:7],subset(water.chemistry,param=="NO3_ugL")[,3:7],subset(water.chemistry,param=="NH4_ugL")[,3:7],subset(water.chemistry,param=="DIN")[,3:7],subset(water.chemistry,param=="TDP")[,3:7],subset(water.chemistry,param=="DOP")[,3:7],subset(water.chemistry,param=="PO4_corr")[,3:7],subset(water.chemistry,param=="DON2DOC")[,3:7],c("boreal","boreal",rep("arctic",times=4),"boreal","arctic","boreal","boreal"))
+
+colnames(water.chemistry.wide)<-c("SampleLoc",paste0("DOC_mgL_",colnames(water.chemistry)[3:7]),paste0("TDN_ugL_",colnames(water.chemistry)[3:7]),paste0("DON_ugL_",colnames(water.chemistry)[3:7]),paste0("NO3_ugL_",colnames(water.chemistry)[3:7]),paste0("NH4_ugL_",colnames(water.chemistry)[3:7]),paste0("DIN_ugL_",colnames(water.chemistry)[3:7]),paste0("TDP_ugL_",colnames(water.chemistry)[3:7]),paste0("DOP_ugL_",colnames(water.chemistry)[3:7]),paste0("SRP_ugL_",colnames(water.chemistry)[3:7]),paste0("DON2DOC",colnames(water.chemistry)[3:7]),"region")
+
+# Merge the chla, chem, and lake dataframes
+lake.data.wide<-right_join(right_join(lake.data,chla.wide[,c("SampleLoc","Depth","Treatment","chla_1","chla_2","chla_3","chla_4","chla_5","chla.mean","chla.sd","chla.count","LDT")], by="SampleLoc"),water.chemistry)
+
+lake.data.long<-right_join(right_join(lake.data,chla.data,by="SampleLoc"),water.chemistry.wide[,c("SampleLoc","DOC_mgL_chem.mean","TDN_ugL_chem.mean","TDP_ugL_chem.mean","DIN_ugL_chem.mean")],by="SampleLoc")
+
+# load transmittance data
+T.data<-read.csv("combinedPARdata.csv")
+
+
+# Load light calculations and merge to other dataframes NB: this is generated in code chunk 2
+light.data<-read.csv2("IncidentLight.csv",header=T,sep=",",dec=".")
+colnames(light.data)[2]<-"Depth"
+light.merge<-left_join(lake.data.wide,light.data,by=c("SampleLoc","Depth"))
+
+
+# Map data
+SwedishLakes <- readOGR("D:/UmeaResearch/ForkWallenbergLakes/EuropeLakes/Vattenytor_vy_y_2016_3/vy_y_2016_3.shp") #Load lakes shapefiles from SMHI
+proj4string(SwedishLakes)
+LakesPlot <- spTransform(SwedishLakes, "+init=epsg:4326") # Transform the shapefile from UTM into lat-long for plotting
+
+```
+
+```{r 2. Estimated light transmission}
+
+# Extract the transmittance at 420 nm
+
+T.420<-T.data[which(T.data$X == 420),]
+a.420<-2-log10(T.420)
+abs.coeff.420<-(a.420*2.303)/0.01
+kd.est<-0.3121+0.1327*abs.coeff.420 #using the equation from Seekell et al. (2015) to estimate kd from a420
+
+all.kd.est<-as.data.frame(cbind(as.vector(names(kd.est)[2:length(kd.est)]),as.vector(kd.est,mode="numeric")[2:length(kd.est)]))
+colnames(all.kd.est)<-c("Sample","estim.kd")
+all.kd.est$SampleLoc<-str_split_fixed(all.kd.est$Sample,"_",3)[,1]
+all.kd.est$filt<-str_split_fixed(all.kd.est$Sample,"_",3)[,2]
+all.kd.est$visit<-str_split_fixed(all.kd.est$Sample,"_",3)[,3]
+
+#Use only the filtered samples, and summarise to get the mean for each lake
+filt.kd.est<-subset(all.kd.est,filt=="filt")
+
+mean.kds<- filt.kd.est %>% group_by(SampleLoc) %>% summarise(avg.kd = mean(as.numeric(as.character(estim.kd))), sd.kd = sd(as.numeric(as.character(estim.kd))))
+
+#Make a new dataframe of lakes and depth to join with the kd estimates
+deployments<-data.frame(SampleLoc = c(mean.kds$SampleLoc,rep("Almb",times=2),rep("BD06",times=2),rep("Nast",times=2),rep("Bjorn",times=2)),NominalDepth = c(rep(1,times=10),0.5,0.1,0.5,0.1,0.5,0.1,0.5,0.1), ActualDepth = c(0.73,0.9,1.02,1,1.09,0.9,1.05,0.51,0.97,0.95,0.56,0.17,0.51,0.17,0.69,0.35,0.48,0.19))
+
+incident.light<-left_join(deployments,mean.kds,by="SampleLoc")
+incident.light$prop.transmitted<-exp(-incident.light$avg.kd*incident.light$ActualDepth) #formula from Arst et al. (1997)
+# write.csv(incident.light,"IncidentLight.csv",row.names = F)
+
+
+```
+
+
+
+```{r 3. Stats on chla data, including polynomial fits for DOC, light, and TDN}
+
+#ANOVA among all the depth experiments, Controls:
+depth.control.aov<-with(subset(chla.data,SampleLoc=="BD06"&Treatment=="C"|SampleLoc=="Almb"&Treatment=="C"|SampleLoc=="Nast"&Treatment=="C"|SampleLoc=="Bjorn"&Treatment=="C"),aov(chla_ug_cm2~loc_depth))
+summary(depth.control.aov)
+TukeyHSD(depth.control.aov)
+# depth.control.letters<-cld(glht(depth.control.aov,linfct=mcp(loc_depth="Tukey")))
+
+
+# Within-site ANOVAs on depth
+depth.control.BD06.aov<-with(subset(chla.data,SampleLoc=="BD06"&Treatment=="C"),aov(chla_ug_cm2~loc_depth))
+summary(depth.control.BD06.aov)
+TukeyHSD(depth.control.BD06.aov)
+
+depth.control.Almb.aov<-with(subset(chla.data,SampleLoc=="Almb"&Treatment=="C"),aov(chla_ug_cm2~loc_depth))
+summary(depth.control.Almb.aov)
+TukeyHSD(depth.control.Almb.aov)
+
+depth.control.Nast.aov<-with(subset(chla.data,SampleLoc=="Nast"&Treatment=="C"),aov(chla_ug_cm2~loc_depth))
+summary(depth.control.Nast.aov)
+TukeyHSD(depth.control.Nast.aov)
+
+depth.control.Bjorn.aov<-with(subset(chla.data,SampleLoc=="Bjorn"&Treatment=="C"),aov(chla_ug_cm2~loc_depth))
+summary(depth.control.Bjorn.aov)
+TukeyHSD(depth.control.Bjorn.aov)
+
+
+
+######################################
+# Boxplot of controls at diff depths #
+######################################
+depth.control.sub<-subset(lake.data.long,SampleLoc=="BD06"&Treatment=="C"|SampleLoc=="Almb"&Treatment=="C"|SampleLoc=="Nast"&Treatment=="C"|SampleLoc=="Bjorn"&Treatment=="C")
+depth.control.sub[['Depth']]<-as.factor(depth.control.sub[['Depth']])
+depth.control.sub$SampleLoc.ordered<-factor(depth.control.sub$SampleLoc,levels=c("Almb","BD06","Bjorn","Nast")[c(2,1,4,3)])
+
+b<-seq(from=0.1,by=0.8,length.out=3)
+# png("Figures/controls.depths.png",height=3,width=4.5,units='in',res=300)
+par(mar=c(3,3,0.5,0.5))
+par(mgp=c(1.1,0.2,0))
+boxplot.depth.control <- boxplot(chla_ug_cm2~Depth+SampleLoc.ordered, data=depth.control.sub, at = c(b,b+3,b+6,b+9), yaxt='n',xaxt='n',col = c("gray90","gray55","gray25"),ylim=c(0.1,7.1),cex.axis=0.8,cex.lab=1,outcex=0.8,ylab=expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")))
+axis(2,tck=0.02,cex.axis=0.8)
+axis(side=1, at=c(0.95,3.95,6.95,9.95), labels=c('BD06','Almb','Nast','Bjorn'), line=0.2, lwd=0,cex.axis=1.1,mgp=c(1.1,0.2,0),tck=0.02)
+#text(c(b,b+3,b+6,b+9),rep(0.4,times=12),c("a","a","ab","ab","bde","ad","ad","de","cde","e","de","abc"),cex=0.7)
+legend("topleft",c("0.1 m","0.5 m","1 m"),pch=15,col = c("gray90","gray55","gray25"),cex=0.8,bty='n')
+# dev.off()
+
+##### Fitting polynomial curve to chl-a vs. DOC
+chla.poly<-with(subset(lake.data.long, Depth=="1" & Treatment == "C"),lm(chla_ug_cm2~poly(DOC_mgL_chem.mean,2,raw=T)))
+summary(chla.poly)
+
+butt<-subset(lake.data.long, Depth=="1" & Treatment == "C")[,c("chla_ug_cm2","DOC_mgL_chem.mean")]
+x<-butt$DOC_mgL_chem.mean
+y<-butt$chla_ug_cm2
+
+test.model<-lm(y~poly(x,2))
+new.dat<-data.frame(x=seq(from=2,to=14,length=100))
+chla.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
+
+# chla polynomial fit:
+#                                     Estimate Std. Error t value Pr(>|t|)    
+#(Intercept)                          -0.25870    1.19525  -0.216 0.829935    
+#poly(DOC_mgL_chem.mean, 2, raw = T)1  1.31711    0.34676   3.798 0.000575 ***
+#poly(DOC_mgL_chem.mean, 2, raw = T)2 -0.08153    0.02060  -3.958 0.000365 ***
+
+#Residual standard error: 1.612 on 34 degrees of freedom
+#Multiple R-squared:  0.3166,	Adjusted R-squared:  0.2764 
+#F-statistic: 7.875 on 2 and 34 DF,  p-value: 0.001547
+
+#chla peak predicted @ 8.06 mgL DOC
+
+##### Fitting polynomial curve to chla vs. light
+chla.light.poly<-with(subset(light.merge, Treatment == "C" & param == "DOC_mgL"),lm(chla.mean~poly(prop.transmitted,2,raw=T)))
+summary(chla.light.poly)
+
+fart<-subset(light.merge, Treatment == "C" & param == "DOC_mgL")[,c("chla.mean","prop.transmitted")]
+x<-fart$prop.transmitted
+y<-fart$chla.mean
+
+test.model<-lm(y~poly(x,2))
+new.dat<-data.frame(x=seq(from=0,to=1,length=100))
+chla.light.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
+
+# chla.light polynomial fit:
+#                                    Estimate Std. Error t value Pr(>|t|)  
+#(Intercept)                            2.352      1.424   1.652   0.1193  
+#poly(prop.transmitted, 2, raw = T)1   11.448      5.764   1.986   0.0656 .
+#poly(prop.transmitted, 2, raw = T)2  -14.139      5.556  -2.545   0.0224 *
+
+#Residual standard error: 1.522 on 15 degrees of freedom
+#Multiple R-squared:  0.3885,	Adjusted R-squared:  0.307 
+#F-statistic: 4.766 on 2 and 15 DF,  p-value: 0.02499
+
+# chla peak predicted @ 40.4% of incident light transmitted
+
+##### Fitting polynomial curve to chl-a vs. TDN
+chla.N.poly<-with(subset(lake.data.long, Depth=="1" & Treatment == "C"),lm(chla_ug_cm2~poly(TDN_ugL_chem.mean,2,raw=T)))
+summary(chla.N.poly)
+
+toot<-subset(lake.data.long, Depth=="1" & Treatment == "C")[,c("chla_ug_cm2","TDN_ugL_chem.mean")]
+x<-toot$TDN_ugL_chem.mean
+y<-toot$chla_ug_cm2
+
+test.model<-lm(y~poly(x,2))
+new.dat<-data.frame(x=seq(from=75,to=330,length=100))
+chla.N.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
+
+# chla.TDN polynomial fit:
+#                                     Estimate Std. Error t value Pr(>|t|)    
+#(Intercept)                          -3.927e+00  1.823e+00  -2.154 0.038416 *  
+#poly(TDN_ugL_chem.mean, 2, raw = T)1  8.141e-02  1.887e-02   4.314 0.000130 ***
+#poly(TDN_ugL_chem.mean, 2, raw = T)2 -1.880e-04  4.499e-05  -4.178 0.000194 ***
+
+#Residual standard error: 1.566 on 34 degrees of freedom
+#Multiple R-squared:  0.3554,	Adjusted R-squared:  0.3174 
+#F-statistic: 9.371 on 2 and 34 DF,  p-value: 0.0005733
+
+#chla peak predicted @ 216.7 ugL TDN
+
+
+```
+```{r 4. Water chemistry}
+
+###############################################
+# Plot of a440 vs. measured DOC concentration #
+###############################################
+
+# png("Figures/a440.v.measDOC.png",height=3,width=3,units='in',res=300)
+par(mar=c(3,3,0.5,0.5))
+par(mgp=c(1.3,0.2,0))
+with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & region == "boreal" & param == "DOC_mgL"),plot(Mean_a440filt..decadal~chem.mean,axes=F,xlab=expression(paste("[DOC] (mg L"^-1,")")),ylab = expression("a"[440]),pch=16,col="gray50",xlim=c(2,14),ylim=c(0,0.07)))
+with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & region == "arctic" & param == "DOC_mgL"),points(Mean_a440filt..decadal~chem.mean,pch=17,col="gray50"))
+axis(1,tck=0.02,cex.axis=0.75)
+axis(2,tck=0.02,cex.axis=0.75)
+box()
+legend('topleft',c("boreal","arctic"),pch=c(16,17),col=c("gray50","gray50"),cex=0.75)
+with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & param == "DOC_mgL"),abline(lsfit(chem.mean,Mean_a440filt..decadal)))
+text(8,0.04,expression(paste("R"^2, "= 0.90")))
+# dev.off()
+
+##############################
+# Nutrients vs. measured DOC #  
+##############################
+
+all.DOC<-c(water.chemistry.wide$DOC_mgL_1,water.chemistry.wide$DOC_mgL_2,water.chemistry.wide$DOC_mgL_3)
+all.TDN<-c(water.chemistry.wide$TDN_ugL_1,water.chemistry.wide$TDN_ugL_2,water.chemistry.wide$TDN_ugL_3)
+all.TDP<-c(water.chemistry.wide$TDP_ugL_1,water.chemistry.wide$TDP_ugL_2,water.chemistry.wide$TDP_ugL_3)
+all.NO3<-c(water.chemistry.wide$NO3_ugL_1,water.chemistry.wide$NO3_ugL_2,water.chemistry.wide$NO3_ugL_3)
+all.NH4<-c(water.chemistry.wide$NH4_ugL_1,water.chemistry.wide$NH4_ugL_2,water.chemistry.wide$NH4_ugL_3)
+all.SRP<-c(water.chemistry.wide$SRP_ugL_1,water.chemistry.wide$SRP_ugL_2,water.chemistry.wide$SRP_ugL_3)
+
+#Stats for these:
+TDN.DOC.lm<-lm(all.TDN~all.DOC)
+#R2 = 0.55, p <0.0001
+
+TDP.DOC.lm<-lm(all.TDP~all.DOC)
+#R2 = 0.68, p <0.0001
+
+NO3.DOC.lm<-lm(all.NO3~all.DOC)
+#R2 = 0.39, p = 0.0002
+
+NH4.DOC.lm<-lm(all.NH4~all.DOC)
+#R2 = 0.55, p < 0.0001
+
+SRP.DOC.lm<-lm(all.SRP~all.DOC)
+#R2 = 0.42, p < 0.0001
+
+```
+
+
+```{r 5. Response ratios}
+
+#Calculate the response ratios for each deployment:
+chla.expt.list<-NULL
+for (i in 1:length(levels(chla.data[["loc_depth"]]))){
+  chla.expt.list[[i]]<-subset(chla.data,loc_depth==as.character(levels(chla.data[["loc_depth"]])[i]))
+}
+
+cont.mean<-NULL
+RR.list<-NULL
+for (i in 1:length(chla.expt.list)){
+  cont.mean[i]<-mean(subset(chla.expt.list[[i]],Treatment=="C")$chla_ug_cm2)
+  RR.list[[i]]<-cbind(as.character(chla.expt.list[[i]]$SampleID),chla.expt.list[[i]][["chla_ug_cm2"]]/cont.mean[i])
+}
+names(RR.list)<-levels(chla.data[["loc_depth"]])
+
+for (i in 1:length(chla.expt.list)){
+  chla.expt.list[[i]]<-cbind(chla.expt.list[[i]],RR.list[[i]][,2])
+  colnames(chla.expt.list[[i]])[ncol(chla.expt.list[[i]])]<-"ResponseRatio"
+}
+
+RR.long<-do.call("rbind",chla.expt.list)
+RR.long[['ResponseRatio']]<-as.numeric(as.character(RR.long[['ResponseRatio']]))
+RR.long$lnRR<-log(RR.long$ResponseRatio,base=exp(1))
+ln.mango<-reshape2::dcast(RR.long,SampleLoc+Depth+Treatment~Rep,value.var=c('lnRR')) # cast dataframe from long to wide format
+lnRR.lake.wide<-merge(ln.mango,lake.data, by="SampleLoc")
+
+#calculate mean and sd for ln transformed response ratios
+lnRR.lake.wide$lnRR.mean<-rowMeans(lnRR.lake.wide[c("1","2","3","4","5")],na.rm=T)
+lnRR.lake.wide$lnRR.sd<-apply(lnRR.lake.wide[c("1","2","3","4","5")],1,sd,na.rm=T)
+lnRR.lake.wide$lnRR.count<-apply(lnRR.lake.wide[c("1","2","3","4","5")],1, function(x) length(which(!is.na(x))))
+
+lnRR.DOC.wide<-merge(lnRR.lake.wide,subset(water.chemistry,param=="DOC_mgL"), by="SampleLoc")
+lnRR.light<-left_join(lnRR.lake.wide,light.data,by=c("SampleLoc","Depth"))
+
+
+##### Regressions for N RR and NP RR vs. light #####
+lnNRR.light.lm<-lm(lnRR.mean~prop.transmitted,data=subset(lnRR.light,Treatment=="N"))
+summary(lnNRR.light.lm)
+# p < 0.0001, adjR2 = 0.63
+# slope = 1.97
+
+lnNPRR.light.lm<-lm(lnRR.mean~prop.transmitted,data=subset(lnRR.light,Treatment=="NP"))
+summary(lnNPRR.light.lm)
+# p < 0.0001, adjR2 = 0.63
+# slope = 2.49
+
+
+```
+
+
+
+
+```{r Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N }
+
+# png("Figures/Manuscript/chlacontrols.v.measDOC.v.light.v.TDN.png",height=2.5,width=8.5,units='in',res=300)
+par(mfcol=c(1,3),
+    mar = c(2.5,0.5,0.5,0.5),
+    mgp=c(1.5,0.2,0),
+    oma=c(0,2.5,0,0))
+
+# panel a: chla vs. DOC for 1 m deployments
+with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & region == "boreal" & param == "DOC_mgL"),plot(chla.mean~chem.mean,xlim=c(2,14),ylim=c(0,8),axes=F,xlab=expression(paste("[DOC] (mg L"^-1,")")),ylab="",pch=16,cex.lab=1.2))
+with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & region == "arctic" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=17))
+with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & region == "boreal" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=16,col="#59595980"))
+with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & region == "arctic" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=17,col="#59595980"))
+with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & param == "DOC_mgL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3))
+with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & param == "DOC_mgL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3,col="#59595980"))
+points(chla.pred$x,chla.pred$y,type="l",col="blue")
+axis(1,tck=0.02,cex.axis=0.9)
+axis(2,tck=0.02,cex.axis=0.9)
+box()
+legend('topright',c("boreal","arctic"),pch=c(16,17),col="black",cex=1, inset = 0.015)
+text(11.75,5,"p = 0.002",adj=0)
+text(11.75,4.5,expression(paste("R"^2," = 0.28")),adj=0)
+text(2,7.75,"A",adj=0,cex=1.5)
+mtext(expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")),side=2,line=1.2,cex=0.9)
+
+# panel B: chla vs. light transmission for all 18 deployments
+with(subset(light.merge, Treatment == "C" & region == "boreal"),plot(chla.mean~prop.transmitted,ylim=c(0,8),xlim=rev(c(0,1)),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab="",pch=16,cex.lab=1.05))
+with(subset(light.merge, Treatment == "C" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17))
+with(subset(light.merge, Treatment == "C"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3))
+axis(1,tck=0.02,cex.axis=0.9)
+axis(2,tck=0.02,labels=F)
+box()
+points(chla.light.pred$x,chla.light.pred$y,type="l",col="blue")
+text(0,5,"p = 0.025",adj=1)
+text(0,4.5,expression(paste("R"^2," = 0.31")),adj=1)
+text(1,7.75,"B",adj=0,cex=1.5)
+
+# panel C:
+with(subset(lake.data.wide, Depth== 1 & Treatment == "C" & region == "boreal" & param == "TDN_ugL"),plot(chla.mean~chem.mean,xlim=c(70,330),ylim=c(0,8),axes=F,xlab=expression(paste("[TDN] (",mu,"g L"^-1,")")),ylab="",pch=16,cex.lab=1.2))
+with(subset(lake.data.wide, Depth==1 & Treatment == "C" & region == "arctic" & param == "TDN_ugL"),points(chla.mean~chem.mean,pch=17))
+with(subset(lake.data.wide, Depth!=1 & Treatment == "C" & region == "boreal" & param == "TDN_ugL"),points(chla.mean~chem.mean,pch=16,col="#59595980"))
+with(subset(lake.data.wide, Depth!=1 & Treatment == "C" & region == "arctic" & param == "TDN_ugL"),points(chla.mean~chem.mean,pch=17,col="#59595980"))
+with(subset(lake.data.wide, Depth==1 &Treatment == "C" & param == "TDN_ugL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3))
+with(subset(lake.data.wide,Depth!=1 &Treatment == "C" & param == "TDN_ugL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3,col="#59595980"))
+points(chla.N.pred$x,chla.N.pred$y,type="l",col="blue")
+axis(1,tck=0.02,cex.axis=0.9)
+axis(2,tck=0.02,labels=F)
+text(75,5,"p < 0.0001",adj=0)
+text(75,4.5,expression(paste("R"^2," = 0.32")),adj=0)
+box()
+text(70,7.75,"C",adj=0,cex=1.5)
+
+# dev.off()
+
+```
+
+
+
+```{r Figure 2: chl-a response ratios vs. light}
+
+# png("Figures/Manuscript/LNchlaRR.vs.light.png",height=4,width=4,units='in',res=300)
+par(mar = c(2.5,2.5,0.5,0.5),
+    mgp=c(1.3,0.2,0))
+
+with(subset(lnRR.light,Depth=="1" & Treatment == "P" & region == "boreal" ),plot(lnRR.mean~prop.transmitted,xlim=rev(c(0,1)),ylim=c(-1.5,2.5),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab=expression(paste("ln(Chl-",italic("a")," Response Ratio)")),cex.lab=0.85,pch=c(16,1,1,1,1),col="#377eb8",cex.axis=0.8))
+with(subset(lnRR.light,Depth=="0.5" & Treatment == "P" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(1,16),col="#377eb8"))
+with(subset(lnRR.light,Depth=="0.1" & Treatment == "P" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(1,1),col="#377eb8"))
+with(subset(lnRR.light, Depth==1 & Treatment == "P" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(2,2,2,2,2),col="#377eb8"))
+with(subset(lnRR.light, Depth==0.5 & Treatment == "P" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(2,2),col="#377eb8"))
+with(subset(lnRR.light, Depth==0.1 & Treatment == "P" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(2,2),col="#377eb8"))
+with(subset(lnRR.light, Treatment == "P"),arrows(prop.transmitted,lnRR.mean-lnRR.sd/(lnRR.count^0.5),prop.transmitted,lnRR.mean+lnRR.sd/(lnRR.count^0.5),length = 0.05,angle = 90, code = 3,col="#377eb8"))
+abline(h=0,lty=2,col="gray55")
+
+with(subset(lnRR.light, Depth==1 & Treatment == "N" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(1,16,1,16,16),col="#e41a1c"))
+with(subset(lnRR.light,Depth=="0.5" & Treatment == "N" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(1,16),col="#e41a1c"))
+with(subset(lnRR.light,Depth=="0.1" & Treatment == "N" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(16,16),col="#e41a1c"))
+with(subset(lnRR.light, Depth==1 & Treatment == "N" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(17,2,2,17,17),col="#e41a1c"))
+with(subset(lnRR.light, Depth==0.5 & Treatment == "N" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(17,17),col="#e41a1c"))
+with(subset(lnRR.light, Depth==0.1 & Treatment == "N" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(17,17),col="#e41a1c"))
+with(subset(lnRR.light, Treatment == "N"),arrows(prop.transmitted,lnRR.mean-lnRR.sd/(lnRR.count^0.5),prop.transmitted,lnRR.mean+lnRR.sd/(lnRR.count^0.5),length = 0.05,angle = 90, code = 3,col="#e41a1c"))
+
+with(subset(lnRR.light, Depth==1 & Treatment == "NP" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(16,16,1,16,1),col="#984ea3"))
+with(subset(lnRR.light,Depth=="0.5" & Treatment == "NP" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(16,1),col="#984ea3"))
+with(subset(lnRR.light,Depth=="0.1" & Treatment == "NP" & region == "boreal"),points(lnRR.mean~prop.transmitted,pch=c(16,16),col="#984ea3"))
+with(subset(lnRR.light, Depth==1 & Treatment == "NP" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(2,17,17,17,17),col="#984ea3"))
+with(subset(lnRR.light, Depth==0.5 & Treatment == "NP" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(17,17),col="#984ea3"))
+with(subset(lnRR.light, Depth==0.1 & Treatment == "NP" & region == "arctic"),points(lnRR.mean~prop.transmitted,pch=c(17,17),col="#984ea3"))
+with(subset(lnRR.light, Treatment == "NP"),arrows(prop.transmitted,lnRR.mean-lnRR.sd/(lnRR.count^0.5),prop.transmitted,lnRR.mean+lnRR.sd/(lnRR.count^0.5),length = 0.05,angle = 90, code = 3,col="#984ea3"))
+
+axis(1,tck=0.02,cex.axis=0.9)
+axis(2,tck=0.02,cex.axis=0.9)
+box()
+abline(lnNRR.light.lm,col="#e41a1c")
+abline(lnNPRR.light.lm,col="#984ea3")
+legend('topright',c("boreal","arctic","N","P","N+P"),pch=c(16,17,15,15,15),col=c("gray50","gray50","#e41a1c","#377eb8","#984ea3"),cex=0.8,inset=0.015)
+
+arrows(0.404, 1.1, 0.404, 0.9, length = 0.06,angle = 30, code = 2)
+text(0.404, 1.15,"inflection point in controls",adj=c(0,0),cex=0.7)
+
+# dev.off()
+
+
+```
+
+
+
+```{r Figure 3: chla vs. light transmission for C, N, and NP treatments with conceptual overlay for habitat type}
+
+for (i in (1:nrow(light.merge))){
+    if (light.merge$SampleLoc[i]=="BD06"|light.merge$SampleLoc[i]=="Almb"|light.merge$SampleLoc[i]=="BD13"){
+        light.merge$substrate[i]<-"cobble"
+    } else if (light.merge$SampleLoc[i]=="Abb2"|light.merge$SampleLoc[i]=="Abb3"|light.merge$SampleLoc[i]=="aStor"|light.merge$SampleLoc[i]=="Bjorn"|light.merge$SampleLoc[i]=="Nast"|light.merge$SampleLoc[i]=="OrtAbb"){
+        light.merge$substrate[i]<-"organic"
+    } else if (light.merge$SampleLoc[i]=="Inre"){
+        light.merge$substrate[i]<-"mixed"
+    }
+}
+
+
+# png("Figures/Manuscript/chlacontrolsNandNP.v.lightWithConceptualOverlay_v2.png",height=4,width=4,units='in',res=300)
+par(mar = c(2.5,2.5,0.5,0.5),
+    mgp=c(1.2,0.2,0))
+
+with(subset(light.merge, Treatment == "C" & region == "boreal"),plot(chla.mean~prop.transmitted,ylim=c(0,26),xlim=rev(c(0,1)),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab=expression(paste("Benthic chl-",italic("a")," (",mu,"g cm"^-2,")")),pch=16,cex.lab=0.9))
+with(subset(light.merge, Treatment == "C" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17))
+with(subset(light.merge, Treatment == "C"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3))
+
+with(subset(light.merge, Treatment == "NP" & region == "boreal"),points(chla.mean~prop.transmitted,pch=16,col="#984ea3"))
+with(subset(light.merge, Treatment == "NP" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17,col="#984ea3"))
+with(subset(light.merge, Treatment == "NP"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3,col="#984ea3"))
+
+with(subset(light.merge, Treatment == "N" & region == "boreal"),points(chla.mean~prop.transmitted,pch=16,col="#e41a1c"))
+with(subset(light.merge, Treatment == "N" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17,col="#e41a1c"))
+with(subset(light.merge, Treatment == "N"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3,col="#e41a1c"))
+
+axis(1,tck=0.02,cex.axis=0.8)
+axis(2,tck=0.02,cex.axis=0.8)
+box()
+
+legend('topright',c("boreal","arctic","C","N","N+P"),pch=c(1,2,15,15,15),col=c("gray30","gray30","black","#e41a1c","#984ea3"),cex=0.9,inset=0.015)
+
+polygon(c(1,1,0.404,0,0),c(-0.33878720,13,13,2.35,-0.33878720),col=rgb(red=0,green=184/255,blue=181/255,alpha=0.75),lty=2,border=rgb(red=0,green=184/255,blue=181/255))
+polygon(c(chla.light.pred$x,0),c(chla.light.pred$y,-0.338787420),col=rgb(red=100/255,green=100/255,blue=100/255,alpha=0.5),lty=2,border=rgb(red=100/255,green=100/255,blue=100/255))
+
+text(0.3,15,"Epilithic algae",adj=c(0,0),cex=0.8,col="#5c5c5c")
+arrows(0.25,14,0.37,3,length = 0.08,angle = 30, code = 2,col="#5c5c5c")
+
+text(1,25,"Potential responses \nof epipelic algae under \ndifferent nutrient \navailabilities",adj=c(0,1),cex=0.8,col="#006967")
+arrows(0.92,19.2,0.79,10,length = 0.08,angle = 30, code = 2,col="#006967")
+
+
+# dev.off()
+
+```
+
+
+
+```{r Figure S1. Map}
+
+# png("Figures/Manuscript/SwedenMap.png",height=8,width=4,units='in',res=300)
+
+par(mar = c(0.5,0.5,0.5,0.5),
+    mgp = c(0.2,0.15,0),
+    oma = c(2.5,2.5,0.5,0.5))
+# Because of some issue with layout and maps, the code breaks with no way to resolve (that I can find), SO it looks like each needs to be generated separately and then stitched together.
+#layout(matrix(c(1,2,
+#                1,3),nrow=2,byrow=TRUE),widths=c(1,1),heights = c(1,1)) 
+
+site.map<-maps::map(database = "world", regions=c("Sweden","Norway","Finland"),xlim=c(10,25),ylim=c(55,70),col=c("white","white","gray90","white","white"), fill=TRUE)
+map.axes(tck=0.02,cex.axis=0.75)
+with(subset(lake.data, region == "boreal"),points(Long,Lat,pch=21,cex=1,bg="#d7191c85"))
+with(subset(lake.data, region == "arctic"),points(Long,Lat,pch=24,cex=0.8,bg="#d7191c85"))
+points(20.3062,63.8174,pch=8,col="yellow",lwd=2,cex=0.85)
+abline(h=66.56319444444445,lty=2,col="gray50")
+polygon(c(17.925,17.925,19.375,19.375),c(68.1,68.7,68.7,68.1))
+polygon(c(18.375,18.375,19.8,19.8),c(63.95,64.65,64.65,63.95))
+mtext(expression(paste("Longitude (",degree,")")),side=1,line=1.3)
+mtext(expression(paste("Latitude (",degree,")")),side=2,line=1.2)
+
+# dev.off()
+
+
+# png("Figures/Manuscript/ArcticMap.png",height=4,width=4,units='in',res=300)
+par(mar = c(0.5,0.5,0.5,0.5),
+    mgp = c(0.2,0.15,0))
+arctic.map<-maps::map(database = "world", regions=c("Sweden","Norway"),xlim=c(17.925,19.375),ylim=c(68.1,68.7),col=c("white","gray90"), fill=TRUE)
+plot(LakesPlot,add=T,col="blue")
+map.axes(tck=0.02,cex.axis=0.75)
+with(subset(lake.data, region == "arctic"),points(Long,Lat,pch=24,cex=1.2,bg="#d7191c"))
+# dev.off()
+
+# png("Figures/Manuscript/BorealMap.png",height=4,width=4,units='in',res=300)
+par(mar = c(0.5,0.5,0.5,0.5),
+    mgp = c(0.2,0.15,0))
+boreal.map<-maps::map(database = "world", regions=c("Sweden"),xlim=c(18.375,19.8),ylim=c(63.95,64.65),col="gray90", fill=TRUE)
+plot(LakesPlot,add=T,col="blue")
+map.axes(tck=0.02,cex.axis=0.75)
+with(subset(lake.data, region == "boreal"),points(Long,Lat,pch=21,cex=1.2,bg="#d7191c"))
+# dev.off()
+
+```
+
+```{r Figure S2. Chla calculation correction}
+
+
+
+```
+
+
+```{r Figure S3. N and P vs. DOC}
+
+# png("Figures/N.v.DOC.png",height=4,width=5,units='in',res=300)
+par(mar=c(3,3,0.5,3))
+par(mgp=c(1.4,0.2,0))
+
+with(subset(water.chemistry.wide, region == "boreal"),plot(TDN_ugL_chem.mean~DOC_mgL_chem.mean,axes=F,xlab=expression(paste("[DOC] (mg L"^-1,")")),ylab = expression(paste("[TDN] or [DON] (",mu,"g L"^-1,")")),pch=16,col="#33a02c",xlim=c(2,14),ylim=c(50,350)))
+with(subset(water.chemistry.wide, region == "arctic"),points(TDN_ugL_chem.mean~DOC_mgL_chem.mean,pch=17,col="#33a02c"))
+with(subset(water.chemistry.wide, region == "boreal"),points(DON_ugL_chem.mean~DOC_mgL_chem.mean,pch=16,col="#b2df8a"))
+with(subset(water.chemistry.wide, region == "arctic"),points(DON_ugL_chem.mean~DOC_mgL_chem.mean,pch=17,col="#b2df8a"))
+axis(1,tck=0.02,cex.axis=0.75)
+axis(2,tck=0.02,cex.axis=0.75)
+
+par(new=T)
+with(subset(water.chemistry.wide, region == "boreal"),plot(NO3_ugL_chem.mean~DOC_mgL_chem.mean,axes=F,xlab="",ylab = "",pch=16,col="#1f78b4",xlim=c(2,14),ylim=c(0,30)))
+with(subset(water.chemistry.wide, region == "arctic"),points(NO3_ugL_chem.mean~DOC_mgL_chem.mean,pch=17,col="#1f78b4"))
+
+with(subset(water.chemistry.wide, region == "boreal"),points(NH4_ugL_chem.mean~DOC_mgL_chem.mean,pch=16,col="#a6cee3"))
+with(subset(water.chemistry.wide, region == "arctic"),points(NH4_ugL_chem.mean~DOC_mgL_chem.mean,pch=17,col="#a6cee3"))
+axis(4,tck=0.02,cex.axis=0.75, at = c(0,5,10,15,20))
+mtext(expression(paste("[NO"[3]^" -","] or [NH"[4]^" +","] (",mu,"g L"^-1,")")),side=4,line=1.6)
+box()
+
+legend('topleft',c("boreal","arctic","TDN","DON",expression("NO"[3]^" -"),expression("NH"[4]^" +")),pch=c(16,17,15,15,15,15),col=c("gray50","gray50","#33a02c","#b2df8a","#1f78b4","#a6cee3"),cex=0.75)
+# dev.off()
+
+
+# png("Figures/P.v.DOC.png",height=4,width=4.525,units='in',res=300)
+par(mar=c(3,3,0.5,0.5))
+par(mgp=c(1.4,0.2,0))
+
+with(subset(water.chemistry.wide, region == "boreal"),plot(TDP_ugL_chem.mean~DOC_mgL_chem.mean,axes=F,xlab=expression(paste("[DOC] (mg L"^-1,")")),ylab = expression(paste("[TDP] or [SRP] (",mu,"g L"^-1,")")),pch=16,col="#ff7f00",xlim=c(2,14),ylim=c(0,15)))
+with(subset(water.chemistry.wide, region == "arctic"),points(TDP_ugL_chem.mean~DOC_mgL_chem.mean,pch=17,col="#ff7f00"))
+with(subset(water.chemistry.wide, region == "boreal"),points(SRP_ugL_chem.mean~DOC_mgL_chem.mean,pch=16,col="#fdbf6f"))
+with(subset(water.chemistry.wide, region == "arctic"),points(SRP_ugL_chem.mean~DOC_mgL_chem.mean,pch=17,col="#fdbf6f"))
+axis(1,tck=0.02,cex.axis=0.75)
+axis(2,tck=0.02,cex.axis=0.75)
+box()
+
+legend('topleft',c("boreal","arctic","TDP","SRP"),pch=c(16,17,15,15),col=c("gray50","gray50","#ff7f00","#fdbf6f"),cex=0.75)
+# dev.off()
+
+```
+
+
+```{r Figure S4. chla vs. light transmission for C, N, and NP treatments}
+
+# png("Figures/chlacontrolsNandNP.v.light.png",height=4,width=4,units='in',res=300)
+par(mar = c(2.5,2.5,0.5,0.5),
+    mgp=c(1.2,0.2,0))
+
+with(subset(light.merge, Treatment == "C" & region == "boreal"),plot(chla.mean~prop.transmitted,ylim=c(0,26),xlim=rev(c(0,1)),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab=expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")),pch=16,cex.lab=0.9))
+with(subset(light.merge, Treatment == "C" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17))
+with(subset(light.merge, Treatment == "C"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3))
+
+with(subset(light.merge, Treatment == "NP" & region == "boreal"),points(chla.mean~prop.transmitted,pch=16,col="#984ea3"))
+with(subset(light.merge, Treatment == "NP" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17,col="#984ea3"))
+with(subset(light.merge, Treatment == "NP"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3,col="#984ea3"))
+
+with(subset(light.merge, Treatment == "N" & region == "boreal"),points(chla.mean~prop.transmitted,pch=16,col="#e41a1c"))
+with(subset(light.merge, Treatment == "N" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17,col="#e41a1c"))
+with(subset(light.merge, Treatment == "N"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3,col="#e41a1c"))
+
+axis(1,tck=0.02,cex.axis=0.8)
+axis(2,tck=0.02,cex.axis=0.8)
+box()
+points(chla.light.pred$x,chla.light.pred$y,type="l",col="darkgray")
+text(0.2,1.5,"p = 0.025",adj=1,col="darkgray")
+text(0.2,0.5,expression(paste("R"^2," = 0.31")),adj=1,col="darkgray")
+
+
+# dev.off()
+```
+

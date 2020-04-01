@@ -1,0 +1,267 @@
+---
+title: "Chla calculations from absorbance spectra"
+author: "M. Fork"
+date: "January 15, 2019"
+output: html_document
+---
+
+The two chunks of code below are used for calculating areal chl-a based on absorbance spectra.
+
+This document uses absorbance spectra (350-800 nm) of pre- and post-acidified samples to calculate chlorophyll-a concentrations after the method described by Steinman, Lamberti and Leavitt (2007) in Methods in Stream Ecology. Their description of the calculations follows:
+
+
+Chlorophyll a (ug/cm2) = 26.7 (E664b - E665a) x Vext/area of substrate (cm2) x L
+
+and
+
+Pheophytin (ug/cm2) = 26.7 (1.7E665a - E664b) x Vext/area of substrate (cm2) x L
+
+where:
+E664b = [{Absorbance of sample at 664 nm - Absorbance of blank at 664 nm}	-
+{Absorbance of sample at 750 nm - Absorbance of blank at 750 nm}]	before
+acidification;
+
+E665a =[{Absorbance of sample at 665 nm - Absorbance of blank at 665 nm}	-
+{Absorbance of sample at 750 nm - Absorbance of blank at 750 nm}]	after
+acidification;
+
+Vext =Volume of 90% acetone used in the extraction (mL);
+
+L=length of path light through cuvette (cm);
+
+26.7=absorbance correction (derived from absorbance coefficient for chlorophyll a at 664 nm [11.0] x correction for acidification [2.43]);
+
+1.7=maximum ratio of E664b:E665a in the absence of pheopigments
+
+
+*NB: Both the Jasco and the Aqualog instruments used for these chl-a measurements, and both internally correct for the blank.
+
+
+The following code will execute these calculations.
+
+```{r Load list of samples and abs spectra files - CSV FILES}
+sample.list<-subset(read.csv("chla_filesID.csv",header=T),Run!="20190703AM"&Run!="20190703PM"&Run!="20190704AM"&Run!="20190704PM")
+
+
+setwd("chlaCSVs")
+
+files.all<-list.files()
+files.blanks<-list.files(pattern="blank")
+files.acidified<-list.files(pattern="HCl")
+files.foo<-files.all[!files.all %in% files.acidified]
+files.unacidified<-files.foo[!files.foo %in% files.blanks]
+
+blanks<-lapply(files.blanks,read.csv2,header=T,sep=";",dec=",")
+names(blanks)<-files.blanks
+acid<-lapply(files.acidified,read.csv2,header=T,sep=";",dec=",")
+names(acid)<-files.acidified
+unacid<-lapply(files.unacidified,read.csv2,header=T,sep=";",dec=",")
+names(unacid)<-files.unacidified
+
+
+
+#Replace stupid comma decimal seperators with decimals: (Not relevant if you're not in Europe)
+
+blanks.dec <- rapply(blanks, function(x) gsub(",", ".", x), 
+                how = "replace") 
+acid.dec <- rapply(acid, function(x) gsub(",", ".", x), 
+                how = "replace") 
+unacid.dec <- rapply(unacid, function(x) gsub(",", ".", x), 
+                how = "replace") 
+
+```
+
+```{r calculate chla}
+#For each sample listed in the sample list file, find the associated files containing the unacidified and acidified data. Use these to calculate chla according to the equations above. Note that blanks are internally subtracted (blank files here are just for reference and should be zeros across the spectrum).
+
+Vext<-20 #volume of extract in ml
+t.area<-4.9087 #exposed surface area of the tile in cm^2 
+chla.ug.cm2<-NULL
+for (i in 1:nrow(sample.list)){
+  chla.ug.cm2[i]<-26.7*
+    ((as.numeric(as.character(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][which(as.character(as.numeric(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][,1]))==665),2]))
+      -as.numeric(as.character(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][which(as.character(as.numeric(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][,1]))==750),2])))
+                    -(as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][which(as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][,1]))==664),2]))-as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][which(as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][,1]))==750),2]))))*Vext/t.area
+}
+
+loc.dep<-paste0(sample.list[["SampleLoc"]],"_",sample.list[["Depth"]]) # generate a column that uniquely identifies each deployment (location x depth)
+chla.data<-cbind(sample.list,loc.dep,chla.ug.cm2)
+colnames(chla.data)<-c(colnames(sample.list),"loc_depth","chla_ug_cm2")
+write.csv(chla.data,"chlaData.csv")
+
+
+
+#### COMPARE using absorbance at 700 nm as the correction #### (This is because I messed up my measurement window and is unlikely to be relevant for you)
+v2.chla.ug.cm2<-NULL
+for (i in 1:nrow(sample.list)){
+  v2.chla.ug.cm2[i]<-26.7*
+    ((as.numeric(as.character(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][which(as.character(as.numeric(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][,1]))==665),2]))
+      -as.numeric(as.character(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][which(as.character(as.numeric(unacid.dec[[which(names(unacid.dec)==paste0(sample.list[["filename"]][i],".csv"))]][,1]))==700),2])))
+                    -(as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][which(as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][,1]))==664),2]))-as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][which(as.numeric(as.character(acid.dec[[which(names(acid.dec)==paste0(sample.list[["filename"]][i],"_HCl.csv"))]][,1]))==700),2]))))*Vext/t.area
+}
+
+
+v2.chla.data<-cbind(sample.list,loc.dep,chla.ug.cm2,v2.chla.ug.cm2)
+colnames(v2.chla.data)<-c(colnames(sample.list),"loc_depth","chla_ug_cm2","chla_ug_cm2_dummy")
+
+dummycorrect<-with(v2.chla.data,lm(chla_ug_cm2_dummy~chla_ug_cm2))
+summary(dummycorrect)  # for linear model comparing the chla values corrected at 750 nm vs. 700 nm: slope = 0.998, intercept = -0.0307, r2 = 0.9999
+
+# Plot this relationship to use as a supplementary figure in the manuscript
+png("Figures/chla_calcs_are_okay.png",height=4,width=4,units='in',res=300)
+par(mar=c(3,3,0.5,0.5))
+par(mgp=c(1.4,0.2,0))
+
+with(v2.chla.data,plot(chla_ug_cm2,chla_ug_cm2_dummy,pch=16,axes=F,xlab=expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,") using 750 nm as reference")),ylab=expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,") using 700 nm as reference"))))
+axis(1,tck=0.02)
+axis(2,tck=0.02)
+box()
+text(0,31,"y = 0.998x - 0.031",adj=0)
+text(0,28.5,expression(paste("r"^2, "= 0.999")),adj=0)
+text(0,26.5,"p < 0.0001",adj=0)
+
+dev.off()
+
+chla.data700<-cbind(sample.list,loc.dep,v2.chla.ug.cm2)
+colnames(chla.data700)<-c(colnames(sample.list),"loc_depth","700nmcorr_chla_ug_cm2")
+write.csv(chla.data700,"chlaData700nmcorr.csv")
+
+
+```
+
+
+```{r Load list of samples and abs spectra files, then calculate chl-a - TXT FILES (July 2019)}
+
+#Load list of samples from JULY 2019 ONLY
+txt.sample.list<-subset(read.csv("chla_filesID.csv",header=T),Run=="20190703AM"|Run=="20190703PM"|Run=="20190704AM"|Run=="20190704PM")
+
+setwd("chlaTXT")
+
+#Categorize files by type
+files.all<-list.files()
+files.blanks<-list.files(pattern="blank")
+files.acidified<-list.files(pattern="acid")
+files.foo<-files.all[!files.all %in% files.acidified]
+files.unacidified<-files.foo[!files.foo %in% files.blanks]
+
+#read in the individual sample spectra
+blanks<-lapply(files.blanks,read.delim,header=T)
+names(blanks)<-files.blanks
+acid<-lapply(files.acidified,read.delim,header=T)
+names(acid)<-files.acidified
+unacid<-lapply(files.unacidified,read.delim,header=T)
+names(unacid)<-files.unacidified
+
+#Fixed variables
+Vext<-20 #volume of extract in ml
+t.area<-4.9087 #exposed surface area of the tile in cm^2 
+
+#Vector to store chla calculations
+new.rep.chla.ug.cm2<-NULL
+for (i in 1:nrow(txt.sample.list)){
+  if (txt.sample.list$Instrument[i]=="Jasco"){
+  new.rep.chla.ug.cm2[i]<-26.7*
+    ((as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][,1]))==665),2]))-as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][,1]))==700),2])))
+                    -(as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][,1]))==664),2]))-as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][,1]))==700),2]))))*Vext/t.area
+  }
+  else{
+    new.rep.chla.ug.cm2[i]<-26.7*
+    ((as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][,1]))==665),10]))-as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(txt.sample.list[["filename"]][i],".txt"))]][,1]))==700),10])))
+                    -(as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][,1]))==664),10]))-as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(txt.sample.list[["filename"]][i],"acid.txt"))]][,1]))==700),10]))))*Vext/t.area
+  }
+}
+
+new.rep.loc.dep<-paste0(txt.sample.list[["SampleLoc"]],"_",txt.sample.list[["Depth"]]) # generate a column that uniquely identifies each deployment (location x depth)
+new.rep.chla.data<-cbind(txt.sample.list,new.rep.loc.dep,new.rep.chla.ug.cm2)
+colnames(new.rep.chla.data)<-c(colnames(txt.sample.list),"loc_depth","chla_ug_cm2")
+write.csv(new.rep.chla.data,"new.rep.chlaData.csv")
+
+
+
+```
+
+```{r Load list of samples and abs spectra files, then calculate chl-a ORTRASK SUBSTRATE EXPERIMENT}
+
+#Load list of samples from JULY 2019 ONLY
+Ortrask.sample.list<-read.csv("Ortrask_chla_filesID.csv",header=T)
+
+setwd("chlaCSVs/OrtraskSubstrateChla")
+
+#Categorize files by type
+files.all<-list.files()
+files.blanks<-list.files(pattern="blank")
+files.acidified<-list.files(pattern="acid")
+files.foo<-files.all[!files.all %in% files.acidified]
+files.unacidified<-files.foo[!files.foo %in% files.blanks]
+
+#read in the individual sample spectra
+blanks<-lapply(files.blanks,read.csv,header=T)
+names(blanks)<-files.blanks
+acid<-lapply(files.acidified,read.csv,header=T)
+names(acid)<-files.acidified
+unacid<-lapply(files.unacidified,read.csv,header=T)
+names(unacid)<-files.unacidified
+
+#Fixed variables
+Vext<-20 #volume of extract in ml
+t.area<-4.9087 #exposed surface area of the tile in cm^2 
+
+#Vector to store chla calculations
+Ortrask.chla.ug.cm2<-NULL
+for (i in 1:nrow(Ortrask.sample.list)){
+    Ortrask.chla.ug.cm2[i]<-26.7*
+    ((as.numeric(as.character(unacid[[which(names(unacid)==paste0(Ortrask.sample.list[["filename"]][i],".csv"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(Ortrask.sample.list[["filename"]][i],".csv"))]][,1]))==665),10]))-as.numeric(as.character(unacid[[which(names(unacid)==paste0(Ortrask.sample.list[["filename"]][i],".csv"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(Ortrask.sample.list[["filename"]][i],".csv"))]][,1]))==700),10])))
+                    -(as.numeric(as.character(acid[[which(names(acid)==paste0(Ortrask.sample.list[["filename"]][i],"acid.csv"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(Ortrask.sample.list[["filename"]][i],"acid.csv"))]][,1]))==664),10]))-as.numeric(as.character(acid[[which(names(acid)==paste0(Ortrask.sample.list[["filename"]][i],"acid.csv"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(Ortrask.sample.list[["filename"]][i],"acid.csv"))]][,1]))==700),10]))))*Vext/t.area
+}
+
+Ortrask.sub.trt<-paste0(Ortrask.sample.list[["Substrate"]],"_",Ortrask.sample.list[["Treatment"]]) 
+Ortrask.chla.data<-cbind(Ortrask.sample.list,Ortrask.sub.trt,Ortrask.chla.ug.cm2)
+colnames(Ortrask.chla.data)<-c(colnames(Ortrask.sample.list),"substrate_trtmt","chla_ug_cm2")
+write.csv(Ortrask.chla.data,"Ortrask.substrates.chlaData.csv")
+
+
+
+```
+
+
+```{r Load list of samples and abs spectra files, then calculate chl-a CHIRO SEDIMENT}
+
+#Load list of samples from JULY 2019 ONLY
+Chiro.sample.list<-read.csv("D:/UmeaResearch/2019 campaign/ChiroSed_chla_filesID.csv",header=T)
+
+setwd("D:/UmeaResearch/2019 campaign/ChiroSedimentChla")
+
+#Categorize files by type
+files.all<-list.files()
+files.blanks<-list.files(pattern="Blank")
+files.acidified<-list.files(pattern="HCl")
+files.foo<-files.all[!files.all %in% files.acidified]
+files.unacidified<-files.foo[!files.foo %in% files.blanks]
+
+#read in the individual sample spectra
+blanks<-lapply(files.blanks,read.csv,header=T)
+names(blanks)<-files.blanks
+acid<-lapply(files.acidified,read.csv,header=T)
+names(acid)<-files.acidified
+unacid<-lapply(files.unacidified,read.csv,header=T)
+names(unacid)<-files.unacidified
+
+#Fixed variables
+Vext<-40 #volume of extract in ml
+t.area<-3.14159*(2.9/2)^2 # surface area of sediment sampled, based on inner diameter of falcom tube = 29mm (cm^2); note that we sampled to a depth of 1.5 cm 
+
+#Vector to store chla calculations
+Chiro.chla.ug.cm2<-NULL
+for (i in 1:nrow(Chiro.sample.list)){
+    Chiro.chla.ug.cm2[i]<-26.7*
+    ((as.numeric(as.character(unacid[[which(names(unacid)==paste0(Chiro.sample.list[["filename"]][i],".csv"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(Chiro.sample.list[["filename"]][i],".csv"))]][,1]))==665),10]))-as.numeric(as.character(unacid[[which(names(unacid)==paste0(Chiro.sample.list[["filename"]][i],".csv"))]][which(as.numeric(as.character(unacid[[which(names(unacid)==paste0(Chiro.sample.list[["filename"]][i],".csv"))]][,1]))==700),10])))
+                    -(as.numeric(as.character(acid[[which(names(acid)==paste0(Chiro.sample.list[["filename"]][i],"HCl.csv"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(Chiro.sample.list[["filename"]][i],"HCl.csv"))]][,1]))==664),10]))-as.numeric(as.character(acid[[which(names(acid)==paste0(Chiro.sample.list[["filename"]][i],"HCl.csv"))]][which(as.numeric(as.character(acid[[which(names(acid)==paste0(Chiro.sample.list[["filename"]][i],"HCl.csv"))]][,1]))==700),10]))))*Vext/t.area
+}
+
+ChiroSed.chla.data<-cbind(Chiro.sample.list,Chiro.chla.ug.cm2)
+colnames(ChiroSed.chla.data)<-c(colnames(Chiro.sample.list),"chla_ug_cm2")
+write.csv(ChiroSed.chla.data,"D:/UmeaResearch/2019 campaign/Chiro.BenthicSediment.chlaData.csv")
+
+
+
+```
