@@ -16,6 +16,7 @@ Code chunks here include:
 
 Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N 
 Figure 2: chl-a response ratios vs. light
+Figure 3: chla vs. light transmission for C, N, and NP treatments with conceptual overlay for habitat type
 Figure S1. Map
 Figure S3. N and P vs. DOC
 Figure S4. chla vs. light transmission for C, N, and NP treatments
@@ -543,12 +544,6 @@ plot(LakesPlot,add=T,col="blue")
 map.axes(tck=0.02,cex.axis=0.75)
 with(subset(lake.data, region == "boreal"),points(Long,Lat,pch=21,cex=1.2,bg="#d7191c"))
 # dev.off()
-
-```
-
-```{r Figure S2. Chla calculation correction}
-
-
 
 ```
 
