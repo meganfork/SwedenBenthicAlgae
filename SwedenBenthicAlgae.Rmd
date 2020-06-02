@@ -10,13 +10,12 @@ The following code was used to perform the analyses and produce the figures in t
 Code chunks here include:
 1. load libraries and data; manipulate and join data
 2. Estimated light transmission
-3. Stats on chla data, including polynomial fits for DOC, light, and TDN
+3. Stats on chla data, including model selection for relationship of controls vs. DOC, light, and TDN
 4. Water chemistry
 5. Chl-a response ratios
 
 Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N 
 Figure 2: chl-a response ratios vs. light
-Figure 3: chla vs. light transmission for C, N, and NP treatments with conceptual overlay for habitat type
 Figure S1. Map
 Figure S3. N and P vs. DOC
 Figure S4. chla vs. light transmission for C, N, and NP treatments
@@ -82,6 +81,7 @@ T.data<-read.csv("combinedPARdata.csv")
 light.data<-read.csv2("IncidentLight.csv",header=T,sep=",",dec=".")
 colnames(light.data)[2]<-"Depth"
 light.merge<-left_join(lake.data.wide,light.data,by=c("SampleLoc","Depth"))
+light.long<-left_join(lake.data.long,light.data,by=c("SampleLoc","Depth"))
 
 
 # Map data
@@ -150,6 +150,22 @@ summary(depth.control.Bjorn.aov)
 TukeyHSD(depth.control.Bjorn.aov)
 
 
+# Within-site ANOVAs and Tukey HSD for differences among treatment responses
+chla.ANOVA.Pvals<-NULL
+chla.treatment.effects<-list()
+for (i in 1:length(levels(chla.data[['loc_depth']]))){
+  chla.ANOVA.Pvals[i]<-summary(with(subset(chla.data,loc_depth==levels(chla.data[['loc_depth']])[i]),aov(chla_ug_cm2~Treatment)))[[1]]$'Pr(>F)'
+  chla.treatment.effects[[i]]<-TukeyHSD(with(subset(chla.data,loc_depth==levels(chla.data[['loc_depth']])[i]),aov(chla_ug_cm2~Treatment)))
+}
+names(chla.treatment.effects)<-levels(chla.data[['loc_depth']])
+#levels(chla.data[['loc_depth']])[c(1,2,5,6,9,10,13,14,17,18)] # 1 m deployments
+for (i in 1:length(chla.treatment.effects)){
+  write.csv(chla.treatment.effects[[i]]$Treatment,file=paste("chla_Tukey/rd2/",names(chla.treatment.effects)[i],"rd2chla_Tukey.csv"))
+}
+chla.ANOVA.Pvals.site<-cbind(names(chla.treatment.effects),chla.ANOVA.Pvals)
+write.csv(chla.ANOVA.Pvals.site,file="chla_Tukey/rd2/rd2chla.ANOVA.pVals.csv")
+
+
 
 ######################################
 # Boxplot of controls at diff depths #
@@ -169,13 +185,51 @@ axis(side=1, at=c(0.95,3.95,6.95,9.95), labels=c('BD06','Almb','Nast','Bjorn'), 
 legend("topleft",c("0.1 m","0.5 m","1 m"),pch=15,col = c("gray90","gray55","gray25"),cex=0.8,bty='n')
 # dev.off()
 
-##### Fitting polynomial curve to chl-a vs. DOC
-chla.poly<-with(subset(lake.data.long, Depth=="1" & Treatment == "C"),lm(chla_ug_cm2~poly(DOC_mgL_chem.mean,2,raw=T)))
-summary(chla.poly)
 
-butt<-subset(lake.data.long, Depth=="1" & Treatment == "C")[,c("chla_ug_cm2","DOC_mgL_chem.mean")]
-x<-butt$DOC_mgL_chem.mean
-y<-butt$chla_ug_cm2
+######################################################################
+### MODEL FITTING for controls along DOC, light, and TDN gradients ###
+######################################################################
+
+### Model seletion for chl-a vs. DOC
+
+## Linear
+chla.DOC.linear <- subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~DOC_mgL_chem.mean,data=.)
+summary(chla.DOC.linear)
+# adj R2 = -0.02677; p = 0.8059
+BIC(chla.DOC.linear)
+# BIC = 162.0605
+
+## Quadratic
+chla.DOC.poly<-subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~poly(DOC_mgL_chem.mean,2,raw=T),data=.)
+summary(chla.DOC.poly)
+# adj R2 = 0.2764; p = 0.0015
+BIC(chla.DOC.poly)
+# BIC = 151.6516
+
+## logrithmic
+chla.DOC.ln<-subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~log(DOC_mgL_chem.mean),data=.)
+summary(chla.DOC.ln)
+# adj R2 = -0.0102; p = 0.4299
+BIC(chla.DOC.ln)
+# BIC = 161.4571
+
+## exponential
+chla.DOC.exp<-subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~exp(DOC_mgL_chem.mean),data=.)
+summary(chla.DOC.exp)
+# adj R2 = 0.1126; p = 0.02402
+BIC(chla.DOC.exp)
+# BIC = 156.6642
+
+### The Quadratic model has the lowest BIC, so that is the model we select
+
+##### Fitting the quadratic model 
+DOC.mod<-subset(lake.data.long, Depth=="1" & Treatment == "C")[,c("chla_ug_cm2","DOC_mgL_chem.mean")]
+x<-DOC.mod$DOC_mgL_chem.mean
+y<-DOC.mod$chla_ug_cm2
 
 test.model<-lm(y~poly(x,2))
 new.dat<-data.frame(x=seq(from=2,to=14,length=100))
@@ -193,37 +247,107 @@ chla.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
 
 #chla peak predicted @ 8.06 mgL DOC
 
-##### Fitting polynomial curve to chla vs. light
-chla.light.poly<-with(subset(light.merge, Treatment == "C" & param == "DOC_mgL"),lm(chla.mean~poly(prop.transmitted,2,raw=T)))
-summary(chla.light.poly)
 
-fart<-subset(light.merge, Treatment == "C" & param == "DOC_mgL")[,c("chla.mean","prop.transmitted")]
-x<-fart$prop.transmitted
-y<-fart$chla.mean
+
+### Model seletion for chl-a vs. light
+
+## Linear
+chla.light.linear <- subset(light.long, Treatment == "C") %>% 
+  lm(chla_ug_cm2~prop.transmitted,data=.)
+summary(chla.light.linear)
+# adj R2 = 0.05835; p = 0.02842
+BIC(chla.light.linear)
+# BIC = 280.6781
+
+## Quadratic
+chla.light.poly<-subset(light.long, Treatment == "C") %>% 
+  lm(chla_ug_cm2~poly(prop.transmitted,2,raw=T),data=.)
+summary(chla.light.poly)
+# adj R2 = 0.2729; p = 1.634e-05
+BIC(chla.light.poly)
+# BIC = 266.7662
+
+## logrithmic
+chla.light.ln<-subset(light.long, Treatment == "C") %>% 
+  lm(chla_ug_cm2~log(prop.transmitted),data=.)
+summary(chla.light.ln)
+# adj R2 = -0.013; p = 0.6865
+BIC(chla.light.ln)
+# BIC = 285.50
+
+## exponential
+chla.light.exp<-subset(light.long, Treatment == "C") %>% 
+  lm(chla_ug_cm2~exp(prop.transmitted),data=.)
+summary(chla.light.exp)
+# adj R2 = 0.09569; p = 0.006624
+BIC(chla.light.exp)
+# BIC = 156.6642
+
+##### Fitting polynomial curve to chla vs. light
+light.mod<-subset(light.long, Treatment == "C")[,c("chla_ug_cm2","prop.transmitted")]
+x<-light.mod$prop.transmitted
+y<-light.mod$chla_ug_cm2
 
 test.model<-lm(y~poly(x,2))
 new.dat<-data.frame(x=seq(from=0,to=1,length=100))
 chla.light.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
 
-# chla.light polynomial fit:
-#                                    Estimate Std. Error t value Pr(>|t|)  
-#(Intercept)                            2.352      1.424   1.652   0.1193  
-#poly(prop.transmitted, 2, raw = T)1   11.448      5.764   1.986   0.0656 .
-#poly(prop.transmitted, 2, raw = T)2  -14.139      5.556  -2.545   0.0224 *
+#                                    Estimate Std. Error t value Pr(>|t|)    
+#(Intercept)                           2.1791     0.7943   2.743 0.007910 ** 
+#poly(prop.transmitted, 2, raw = T)1  11.7104     3.2566   3.596 0.000635 ***
+#poly(prop.transmitted, 2, raw = T)2 -14.2892     3.2047  -4.459 3.46e-05 ***
+#---
+#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
-#Residual standard error: 1.522 on 15 degrees of freedom
-#Multiple R-squared:  0.3885,	Adjusted R-squared:  0.307 
-#F-statistic: 4.766 on 2 and 15 DF,  p-value: 0.02499
+#Residual standard error: 1.646 on 63 degrees of freedom
+#Multiple R-squared:  0.2952,	Adjusted R-squared:  0.2729 
+#F-statistic:  13.2 on 2 and 63 DF,  p-value: 1.634e-05
 
-# chla peak predicted @ 40.4% of incident light transmitted
+# chla peak predicted @ 41.4% of incident light transmitted
+
+
+
+
+### Model seletion for chl-a vs. TDN
+
+## Linear
+chla.TDN.linear <- subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~TDN_ugL_chem.mean,data=.)
+summary(chla.TDN.linear)
+# adj R2 = -0.00344; p = 0.3556
+BIC(chla.TDN.linear)
+# BIC = 161.2099
+
+## Quadratic
+chla.TDN.poly<-subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~poly(TDN_ugL_chem.mean,2,raw=T),data=.)
+summary(chla.TDN.poly)
+# adj R2 = 0.3174 ; p = 0.0005733
+BIC(chla.TDN.poly)
+# BIC = 149.4906
+
+## logrithmic
+chla.TDN.ln<-subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~log(TDN_ugL_chem.mean),data=.)
+summary(chla.TDN.ln)
+# adj R2 = 0.04719; p = 0.1042
+BIC(chla.TDN.ln)
+# BIC = 159.2944
+
+## exponential
+chla.TDN.exp<-subset(lake.data.long, Depth=="1" & Treatment == "C") %>% 
+  lm(chla_ug_cm2~exp(TDN_ugL_chem.mean),data=.)
+summary(chla.TDN.exp)
+# adj R2 = 0.1126; p = 0.02402
+BIC(chla.TDN.exp)
+# BIC = 156.3596
+
+### The Quadratic model has the lowest BIC, so that is the model we select
 
 ##### Fitting polynomial curve to chl-a vs. TDN
-chla.N.poly<-with(subset(lake.data.long, Depth=="1" & Treatment == "C"),lm(chla_ug_cm2~poly(TDN_ugL_chem.mean,2,raw=T)))
-summary(chla.N.poly)
-
-toot<-subset(lake.data.long, Depth=="1" & Treatment == "C")[,c("chla_ug_cm2","TDN_ugL_chem.mean")]
-x<-toot$TDN_ugL_chem.mean
-y<-toot$chla_ug_cm2
+TDN.mod<-subset(lake.data.long, Depth=="1" & Treatment == "C")[,c("chla_ug_cm2","TDN_ugL_chem.mean")]
+x<-TDN.mod$TDN_ugL_chem.mean
+y<-TDN.mod$chla_ug_cm2
 
 test.model<-lm(y~poly(x,2))
 new.dat<-data.frame(x=seq(from=75,to=330,length=100))
@@ -243,6 +367,9 @@ chla.N.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
 
 
 ```
+
+
+
 ```{r 4. Water chemistry}
 
 ###############################################
@@ -346,8 +473,9 @@ summary(lnNPRR.light.lm)
 
 
 ```{r Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N }
+setwd("D:/UmeaResearch/ForkWallenbergLakes")
 
-# png("Figures/Manuscript/chlacontrols.v.measDOC.v.light.v.TDN.png",height=2.5,width=8.5,units='in',res=300)
+ png("Figures/Manuscript/chlacontrols.v.measDOC.v.light.v.TDN.png",height=2.5,width=8.5,units='in',res=300)
 par(mfcol=c(1,3),
     mar = c(2.5,0.5,0.5,0.5),
     mgp=c(1.5,0.2,0),
@@ -378,8 +506,8 @@ axis(1,tck=0.02,cex.axis=0.9)
 axis(2,tck=0.02,labels=F)
 box()
 points(chla.light.pred$x,chla.light.pred$y,type="l",col="blue")
-text(0,5,"p = 0.025",adj=1)
-text(0,4.5,expression(paste("R"^2," = 0.31")),adj=1)
+text(0,5,"p < 0.0001",adj=1)
+text(0,4.5,expression(paste("R"^2," = 0.27")),adj=1)
 text(1,7.75,"B",adj=0,cex=1.5)
 
 # panel C:
@@ -397,7 +525,7 @@ text(75,4.5,expression(paste("R"^2," = 0.32")),adj=0)
 box()
 text(70,7.75,"C",adj=0,cex=1.5)
 
-# dev.off()
+ dev.off()
 
 ```
 
@@ -405,7 +533,9 @@ text(70,7.75,"C",adj=0,cex=1.5)
 
 ```{r Figure 2: chl-a response ratios vs. light}
 
-# png("Figures/Manuscript/LNchlaRR.vs.light.png",height=4,width=4,units='in',res=300)
+setwd("D:/UmeaResearch/ForkWallenbergLakes")
+
+ png("Figures/Manuscript/LNchlaRR.vs.light.png",height=4,width=4,units='in',res=300)
 par(mar = c(2.5,2.5,0.5,0.5),
     mgp=c(1.3,0.2,0))
 
@@ -441,10 +571,7 @@ abline(lnNRR.light.lm,col="#e41a1c")
 abline(lnNPRR.light.lm,col="#984ea3")
 legend('topright',c("boreal","arctic","N","P","N+P"),pch=c(16,17,15,15,15),col=c("gray50","gray50","#e41a1c","#377eb8","#984ea3"),cex=0.8,inset=0.015)
 
-arrows(0.404, 1.1, 0.404, 0.9, length = 0.06,angle = 30, code = 2)
-text(0.404, 1.15,"inflection point in controls",adj=c(0,0),cex=0.7)
-
-# dev.off()
+ dev.off()
 
 
 ```
@@ -463,12 +590,17 @@ for (i in (1:nrow(light.merge))){
     }
 }
 
-
-# png("Figures/Manuscript/chlacontrolsNandNP.v.lightWithConceptualOverlay_v2.png",height=4,width=4,units='in',res=300)
+setwd("D:/UmeaResearch/ForkWallenbergLakes")
+ png("Figures/Manuscript/chlacontrolsNandNP.v.lightWithConceptualOverlay_v2.png",height=4,width=4,units='in',res=300)
 par(mar = c(2.5,2.5,0.5,0.5),
     mgp=c(1.2,0.2,0))
 
-with(subset(light.merge, Treatment == "C" & region == "boreal"),plot(chla.mean~prop.transmitted,ylim=c(0,26),xlim=rev(c(0,1)),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab=expression(paste("Benthic chl-",italic("a")," (",mu,"g cm"^-2,")")),pch=16,cex.lab=0.9))
+with(subset(light.merge, Treatment == "C" & region == "boreal"),plot(chla.mean~prop.transmitted,ylim=c(0,26),xlim=rev(c(0,1)),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab=expression(paste("Benthic chl-",italic("a")," (",mu,"g cm"^-2,")")),cex.lab=0.9, type = 'n'))
+
+polygon(c(1,1,0.404,0,0),c(-0.33878720,13,13,2.35,-0.33878720),col=rgb(red=0,green=184/255,blue=181/255,alpha=0.75),lty=2,border=rgb(red=0,green=184/255,blue=181/255))
+polygon(c(chla.light.pred$x,0),c(chla.light.pred$y,-0.338787420),col=rgb(red=100/255,green=100/255,blue=100/255,alpha=0.5),lty=2,border=rgb(red=100/255,green=100/255,blue=100/255))
+
+with(subset(light.merge, Treatment == "C" & region == "boreal"),points(chla.mean~prop.transmitted, pch = 16))
 with(subset(light.merge, Treatment == "C" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17))
 with(subset(light.merge, Treatment == "C"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3))
 
@@ -486,17 +618,14 @@ box()
 
 legend('topright',c("boreal","arctic","C","N","N+P"),pch=c(1,2,15,15,15),col=c("gray30","gray30","black","#e41a1c","#984ea3"),cex=0.9,inset=0.015)
 
-polygon(c(1,1,0.404,0,0),c(-0.33878720,13,13,2.35,-0.33878720),col=rgb(red=0,green=184/255,blue=181/255,alpha=0.75),lty=2,border=rgb(red=0,green=184/255,blue=181/255))
-polygon(c(chla.light.pred$x,0),c(chla.light.pred$y,-0.338787420),col=rgb(red=100/255,green=100/255,blue=100/255,alpha=0.5),lty=2,border=rgb(red=100/255,green=100/255,blue=100/255))
-
-text(0.3,15,"Epilithic algae",adj=c(0,0),cex=0.8,col="#5c5c5c")
+text(0.3,15,"Response area \nfor epilithic algae",adj=c(0,0),cex=0.8,col="#5c5c5c")
 arrows(0.25,14,0.37,3,length = 0.08,angle = 30, code = 2,col="#5c5c5c")
 
-text(1,25,"Potential responses \nof epipelic algae under \ndifferent nutrient \navailabilities",adj=c(0,1),cex=0.8,col="#006967")
+text(1,25,"Potential response area \nfor epipelic algae under \ndifferent nutrient \navailabilities",adj=c(0,1),cex=0.8,col="#006967")
 arrows(0.92,19.2,0.79,10,length = 0.08,angle = 30, code = 2,col="#006967")
 
 
-# dev.off()
+ dev.off()
 
 ```
 
@@ -544,6 +673,12 @@ plot(LakesPlot,add=T,col="blue")
 map.axes(tck=0.02,cex.axis=0.75)
 with(subset(lake.data, region == "boreal"),points(Long,Lat,pch=21,cex=1.2,bg="#d7191c"))
 # dev.off()
+
+```
+
+```{r Figure S2. Chla calculation correction}
+
+
 
 ```
 
