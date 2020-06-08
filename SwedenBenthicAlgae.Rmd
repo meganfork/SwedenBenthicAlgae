@@ -10,7 +10,7 @@ The following code was used to perform the analyses and produce the figures in t
 Code chunks here include:
 1. load libraries and data; manipulate and join data
 2. Estimated light transmission
-3. Stats on chla data, including model selection for relationship of controls vs. DOC, light, and TDN
+3. Stats on chla data, including depth effects and model selection for DOC, light, and TDN gradients
 4. Water chemistry
 5. Chl-a response ratios
 
@@ -18,7 +18,9 @@ Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N
 Figure 2: chl-a response ratios vs. light
 Figure S1. Map
 Figure S3. N and P vs. DOC
-Figure S4. chla vs. light transmission for C, N, and NP treatments
+Figure S4. absorbance vs. DOC
+Figure S5. Within-lake effects of depth on chl-a
+Figure S6. chla vs. light transmission for C, N, and NP treatments
 
 *For Figure S2, see other code file "ChlaCalculations.csv"
 
@@ -123,7 +125,7 @@ incident.light$prop.transmitted<-exp(-incident.light$avg.kd*incident.light$Actua
 
 
 
-```{r 3. Stats on chla data, including polynomial fits for DOC, light, and TDN}
+```{r 3. Stats on chla data, including depth effects and model fits for DOC, light, and TDN gradients}
 
 #ANOVA among all the depth experiments, Controls:
 depth.control.aov<-with(subset(chla.data,SampleLoc=="BD06"&Treatment=="C"|SampleLoc=="Almb"&Treatment=="C"|SampleLoc=="Nast"&Treatment=="C"|SampleLoc=="Bjorn"&Treatment=="C"),aov(chla_ug_cm2~loc_depth))
@@ -174,6 +176,7 @@ depth.control.sub<-subset(lake.data.long,SampleLoc=="BD06"&Treatment=="C"|Sample
 depth.control.sub[['Depth']]<-as.factor(depth.control.sub[['Depth']])
 depth.control.sub$SampleLoc.ordered<-factor(depth.control.sub$SampleLoc,levels=c("Almb","BD06","Bjorn","Nast")[c(2,1,4,3)])
 
+## All in one figure - not in paper
 b<-seq(from=0.1,by=0.8,length.out=3)
 # png("Figures/controls.depths.png",height=3,width=4.5,units='in',res=300)
 par(mar=c(3,3,0.5,0.5))
@@ -181,9 +184,49 @@ par(mgp=c(1.1,0.2,0))
 boxplot.depth.control <- boxplot(chla_ug_cm2~Depth+SampleLoc.ordered, data=depth.control.sub, at = c(b,b+3,b+6,b+9), yaxt='n',xaxt='n',col = c("gray90","gray55","gray25"),ylim=c(0.1,7.1),cex.axis=0.8,cex.lab=1,outcex=0.8,ylab=expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")))
 axis(2,tck=0.02,cex.axis=0.8)
 axis(side=1, at=c(0.95,3.95,6.95,9.95), labels=c('BD06','Almb','Nast','Bjorn'), line=0.2, lwd=0,cex.axis=1.1,mgp=c(1.1,0.2,0),tck=0.02)
-#text(c(b,b+3,b+6,b+9),rep(0.4,times=12),c("a","a","ab","ab","bde","ad","ad","de","cde","e","de","abc"),cex=0.7)
+# text(c(b,b+3,b+6,b+9),rep(0.4,times=12),c("a","a","ab","ab","bde","ad","ad","de","cde","e","de","abc"),cex=0.7) # comparison among all lakes
+text(c(b,b+3,b+6,b+9),rep(0.4,times=12),c("a","a","b","a","a","a","a","a","a","a","ab","b"),cex=0.7) # within lake comparisons
 legend("topleft",c("0.1 m","0.5 m","1 m"),pch=15,col = c("gray90","gray55","gray25"),cex=0.8,bty='n')
 # dev.off()
+
+
+## Four panels - Figure S5
+
+setwd("D:/UmeaResearch/ForkWallenbergLakes")
+
+ png("Figures/MAnuscript/controls.depths.withinLake.png",height=3,width=4.5,units='in',res=300)
+par(mfcol=c(2,2),
+    mar = c(0.5,0.7,0.5,0.5),
+    mgp=c(1,0.2,0),
+    oma=c(0,3,0,0))
+BD06.depth.control.boxplot <- boxplot(chla_ug_cm2~Depth, data=subset(lake.data.long,SampleLoc=="BD06"&Treatment=="C"), at = b, yaxt='n',xaxt='n',col = c("gray90","gray55","gray25"),ylim=c(0.1,7.1),cex.axis=0.8,cex.lab=1,outcex=0.8,ylab="")
+axis(2,tck=0.02,cex.axis=0.8)
+text(b, rep(0.5,times=3), c("a", "a", "b"))
+text(0.9,6.9,"BD06")
+legend("topleft",c("0.1 m","0.5 m","1 m"),pch=15,col = c("gray90","gray55","gray25"),cex=0.8,bty='n')
+
+Almb.depth.control.boxplot <- boxplot(chla_ug_cm2~Depth, data=subset(lake.data.long,SampleLoc=="Almb"&Treatment=="C"), at = b, yaxt='n',xaxt='n',col = c("gray90","gray55","gray25"),ylim=c(0.1,7.1),cex.axis=0.8,cex.lab=1,outcex=0.8,ylab=expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")))
+axis(2,tck=0.02,cex.axis=0.8)
+text(b, rep(0.5,times=3), c("a", "a", "a"))
+text(0.9,6.9,"Almb")
+
+mtext(expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")), side =2, line = 1.5, at = 7)
+
+Nast.depth.control.boxplot <- boxplot(chla_ug_cm2~Depth, data=subset(lake.data.long,SampleLoc=="Nast"&Treatment=="C"), at = b, yaxt='n',xaxt='n',col = c("gray90","gray55","gray25"),ylim=c(0.1,7.1),cex.axis=0.8,cex.lab=1,outcex=0.8,ylab="")
+axis(2,tck=0.02,cex.axis=0.8)
+text(b, rep(0.5,times=3), c("a", "a", "a"))
+text(0.9,6.9,"Nast")
+
+Bjorn.depth.control.boxplot <- boxplot(chla_ug_cm2~Depth, data=subset(lake.data.long,SampleLoc=="Bjorn"&Treatment=="C"), at = b, yaxt='n',xaxt='n',col = c("gray90","gray55","gray25"),ylim=c(0.1,7.1),cex.axis=0.8,cex.lab=1,outcex=0.8,ylab="")
+axis(2,tck=0.02,cex.axis=0.8)
+text(b, rep(0.5,times=3), c("a", "ab", "b"))
+text(0.9,6.9,"Bjorn")
+
+dev.off()
+
+
+
+
 
 
 ######################################################################
@@ -373,7 +416,7 @@ chla.N.pred<-data.frame(y=predict(test.model,newdata = new.dat),x=new.dat$x)
 ```{r 4. Water chemistry}
 
 ###############################################
-# Plot of a440 vs. measured DOC concentration #
+# Plot of a440 vs. measured DOC concentration # - FIGURE S4
 ###############################################
 
 # png("Figures/a440.v.measDOC.png",height=3,width=3,units='in',res=300)
@@ -472,7 +515,7 @@ summary(lnNPRR.light.lm)
 
 
 
-```{r Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. light and c) chl-a vs. N }
+```{r Figure 1: 3 panels for a) chl-a vs. DOC, b) chl-a vs. N and c) chl-a vs. light }
 setwd("D:/UmeaResearch/ForkWallenbergLakes")
 
  png("Figures/Manuscript/chlacontrols.v.measDOC.v.light.v.TDN.png",height=2.5,width=8.5,units='in',res=300)
@@ -484,21 +527,39 @@ par(mfcol=c(1,3),
 # panel a: chla vs. DOC for 1 m deployments
 with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & region == "boreal" & param == "DOC_mgL"),plot(chla.mean~chem.mean,xlim=c(2,14),ylim=c(0,8),axes=F,xlab=expression(paste("[DOC] (mg L"^-1,")")),ylab="",pch=16,cex.lab=1.2))
 with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & region == "arctic" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=17))
-with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & region == "boreal" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=16,col="#59595980"))
-with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & region == "arctic" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=17,col="#59595980"))
+# with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & region == "boreal" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=16,col="#59595980"))
+# with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & region == "arctic" & param == "DOC_mgL"),points(chla.mean~chem.mean,pch=17,col="#59595980"))
 with(subset(lake.data.wide, Depth=="1" & Treatment == "C" & param == "DOC_mgL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3))
-with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & param == "DOC_mgL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3,col="#59595980"))
+# with(subset(lake.data.wide, Depth!="1" & Treatment == "C" & param == "DOC_mgL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3,col="#59595980")) # This would plot the points for deployments other than 1 m depth
 points(chla.pred$x,chla.pred$y,type="l",col="blue")
 axis(1,tck=0.02,cex.axis=0.9)
 axis(2,tck=0.02,cex.axis=0.9)
 box()
 legend('topright',c("boreal","arctic"),pch=c(16,17),col="black",cex=1, inset = 0.015)
-text(11.75,5,"p = 0.002",adj=0)
-text(11.75,4.5,expression(paste("R"^2," = 0.28")),adj=0)
+text(0.8*max(subset(lake.data.wide, param == "DOC_mgL")$chem.mean),0.8,"p = 0.002",adj=0)
+text(0.8*max(subset(lake.data.wide, param == "DOC_mgL")$chem.mean),0.3,expression(paste("R"^2," = 0.28")),adj=0)
 text(2,7.75,"A",adj=0,cex=1.5)
 mtext(expression(paste("Chl-",italic("a")," (",mu,"g cm"^-2,")")),side=2,line=1.2,cex=0.9)
 
-# panel B: chla vs. light transmission for all 18 deployments
+# panel B:
+# to convert to micromolar units for TDN, we'll pull the TDN subset out and divide to convert units before plotting:
+TDN.umolar <- subset(lake.data.wide, param == "TDN_ugL") 
+TDN.umolar$TDN_umolL <- TDN.umolar$chem.mean/14
+with(subset(TDN.umolar, Depth== 1 & Treatment == "C" & region == "boreal"), plot(chla.mean~TDN_umolL, xlim=c((70/14),(330/14)), ylim=c(0,8), axes=F, xlab=expression(paste("[TDN] (",mu,"mol L"^-1,")")),ylab="",pch=16,cex.lab=1.2))
+with(subset(TDN.umolar, Depth==1 & Treatment == "C" & region == "arctic" & param == "TDN_ugL"),points(chla.mean~TDN_umolL,pch=17))
+# with(subset(TDN.umolar, Depth!=1 & Treatment == "C" & region == "boreal" & param == "TDN_ugL"),points(chla.mean~TDN_umolL,pch=16,col="#59595980"))
+# with(subset(TDN.umolar, Depth!=1 & Treatment == "C" & region == "arctic" & param == "TDN_ugL"),points(chla.mean~TDN_umolL,pch=17,col="#59595980"))
+with(subset(TDN.umolar, Depth==1 &Treatment == "C" & param == "TDN_ugL"),arrows(TDN_umolL,chla.mean-(chla.sd/(chla.count^0.5)),TDN_umolL,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3))
+# with(subset(TDN.umolar,Depth!=1 &Treatment == "C" & param == "TDN_ugL"),arrows(TDN_umolL,chla.mean-(chla.sd/(chla.count^0.5)),TDN_umolL,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3,col="#59595980")) # This would plot the points for deployments other than 1 m depth
+points((chla.N.pred$x/14),chla.N.pred$y,type="l",col="blue")
+axis(1,tck=0.02,cex.axis=0.9)
+axis(2,tck=0.02,labels=F)
+text(0.85*max(TDN.umolar$TDN_umolL),0.8,"p < 0.0001",adj=0)
+text(0.85*max(TDN.umolar$TDN_umolL),0.3,expression(paste("R"^2," = 0.32")),adj=0)
+box()
+text(70/14,7.75,"B",adj=0,cex=1.5)
+
+# panel C: chla vs. light transmission for all 18 deployments
 with(subset(light.merge, Treatment == "C" & region == "boreal"),plot(chla.mean~prop.transmitted,ylim=c(0,8),xlim=rev(c(0,1)),axes=F,xlab = "Proportion of incident light transmitted to deployment",ylab="",pch=16,cex.lab=1.05))
 with(subset(light.merge, Treatment == "C" & region == "arctic"),points(chla.mean~prop.transmitted,pch=17))
 with(subset(light.merge, Treatment == "C"),arrows(prop.transmitted,chla.mean-chla.sd/(chla.count^0.5),prop.transmitted,chla.mean+chla.sd/(chla.count^0.5),length = 0.05,angle = 90, code = 3))
@@ -506,24 +567,9 @@ axis(1,tck=0.02,cex.axis=0.9)
 axis(2,tck=0.02,labels=F)
 box()
 points(chla.light.pred$x,chla.light.pred$y,type="l",col="blue")
-text(0,5,"p < 0.0001",adj=1)
-text(0,4.5,expression(paste("R"^2," = 0.27")),adj=1)
-text(1,7.75,"B",adj=0,cex=1.5)
-
-# panel C:
-with(subset(lake.data.wide, Depth== 1 & Treatment == "C" & region == "boreal" & param == "TDN_ugL"),plot(chla.mean~chem.mean,xlim=c(70,330),ylim=c(0,8),axes=F,xlab=expression(paste("[TDN] (",mu,"g L"^-1,")")),ylab="",pch=16,cex.lab=1.2))
-with(subset(lake.data.wide, Depth==1 & Treatment == "C" & region == "arctic" & param == "TDN_ugL"),points(chla.mean~chem.mean,pch=17))
-with(subset(lake.data.wide, Depth!=1 & Treatment == "C" & region == "boreal" & param == "TDN_ugL"),points(chla.mean~chem.mean,pch=16,col="#59595980"))
-with(subset(lake.data.wide, Depth!=1 & Treatment == "C" & region == "arctic" & param == "TDN_ugL"),points(chla.mean~chem.mean,pch=17,col="#59595980"))
-with(subset(lake.data.wide, Depth==1 &Treatment == "C" & param == "TDN_ugL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3))
-with(subset(lake.data.wide,Depth!=1 &Treatment == "C" & param == "TDN_ugL"),arrows(chem.mean,chla.mean-(chla.sd/(chla.count^0.5)),chem.mean,chla.mean+(chla.sd/(chla.count^0.5)),length = 0.05,angle = 90, code = 3,col="#59595980"))
-points(chla.N.pred$x,chla.N.pred$y,type="l",col="blue")
-axis(1,tck=0.02,cex.axis=0.9)
-axis(2,tck=0.02,labels=F)
-text(75,5,"p < 0.0001",adj=0)
-text(75,4.5,expression(paste("R"^2," = 0.32")),adj=0)
-box()
-text(70,7.75,"C",adj=0,cex=1.5)
+text(0.25,0.8,"p < 0.0001",adj=0)
+text(0.25,0.3,expression(paste("R"^2," = 0.27")),adj=0)
+text(1,7.75,"C",adj=0,cex=1.5)
 
  dev.off()
 
